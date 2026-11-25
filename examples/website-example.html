@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Website Example</title>
+</head>
+<body>
+<!-- How your website calls the agent. Serve it from an origin listed in ALLOWED_ORIGINS, e.g.
+     `python3 -m http.server 3000` in the project folder, then open
+     http://localhost:3000/examples/website-example.html -->
+<h1>Print example</h1>
+<p>Agent: <span id="status">checking…</span></p>
+<button id="print">Print label</button>
+<p id="result"></p>
+
+<script type="module">
+  import { agentStatus, printLabel } from '../client/label-printer.js';
+  import { makeTestLabelPdf } from '../client/test-label.js';
+
+  agentStatus()
+    .then((s) => { document.getElementById('status').textContent = `ready, printer ${s.printer}`; })
+    .catch((e) => { document.getElementById('status').textContent = e.message; });
+
+  document.getElementById('print').addEventListener('click', async () => {
+    // In your site this PDF usually comes from your backend, e.g. (await fetch('/labels/1042.pdf')).blob()
+    const pdf = makeTestLabelPdf({ lines: ['Order #1042', 'From the website'] });
+    try {
+      const r = await printLabel(pdf, { copies: 1 });
+      document.getElementById('result').textContent = `Printed: ${JSON.stringify(r)}`;
+    } catch (e) {
+      document.getElementById('result').textContent = `Failed: ${e.message}`;
+    }
+  });
+</script>
+</body>
+</html>

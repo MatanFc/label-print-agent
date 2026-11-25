@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Label Print Agent</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #5d6673; --border: #d9dde3;
+    --accent: #2f5fd0; --ok: #1d7a46; --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b; --card: #1c2026; --text: #e6e9ed; --muted: #9aa4b0; --border: #2e343c;
+      --accent: #7aa2ff; --ok: #5fcf8f; --err: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+  input, textarea { width: 100%; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+  textarea { min-height: 70px; resize: vertical; }
+  .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
+  .field { margin-bottom: 12px; }
+  button { font: inherit; background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .result { margin-top: 12px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ok { color: var(--ok); } .err { color: var(--err); }
+  ul { margin: 0; padding-left: 20px; }
+  li.configured { font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Label Print Agent</h1>
+  <p class="sub">This page is served by the agent itself, so you can test printing without your website.</p>
+
+  <section>
+    <h2>Agent</h2>
+    <dl id="status"><dt>Status</dt><dd>Checking…</dd></dl>
+  </section>
+
+  <section>
+    <h2>Printers on this computer</h2>
+    <div id="printers">Loading…</div>
+  </section>
+
+  <section>
+    <h2>Print a test label</h2>
+    <div class="row">
+      <div><label for="w">Width (mm)</label><input id="w" type="number" min="10" max="1000" value="100"></div>
+      <div><label for="h">Height (mm)</label><input id="h" type="number" min="10" max="1000" value="62"></div>
+      <div><label for="copies">Copies</label><input id="copies" type="number" min="1" max="100" value="1"></div>
+    </div>
+    <div class="field">
+      <label for="text">Text (one line per row)</label>
+      <textarea id="text">Hello from the label agent</textarea>
+    </div>
+    <button id="print-test">Print test label</button>
+    <div class="result" id="test-result"></div>
+  </section>
+
+  <section>
+    <h2>Print a PDF file</h2>
+    <div class="field"><input id="file" type="file" accept="application/pdf"></div>
+    <button id="print-file">Print PDF</button>
+    <div class="result" id="file-result"></div>
+  </section>
+</main>
+
+<script type="module">
+  import { agentStatus, listPrinters, printLabel } from '/client/label-printer.js';
+  import { makeTestLabelPdf } from '/client/test-label.js';
+
+  const agentUrl = location.origin;
+  const $ = (id) => document.getElementById(id);
+
+  function show(el, ok, text) {
+    el.className = `result ${ok ? 'ok' : 'err'}`;
+    el.textContent = text;
+  }
+
+  function row(term, value) {
+    const dt = document.createElement('dt'); dt.textContent = term;
+    const dd = document.createElement('dd'); dd.textContent = value;
+    return [dt, dd];
+  }
+
+  async function refresh() {
+    try {
+      const s = await agentStatus({ agentUrl });
+      $('status').replaceChildren(
+        ...row('Status', 'Running'),
+        ...row('Platform', s.platform),
+        ...row('Printer', s.printer),
+        ...row('Mode', s.dryRun ? 'Dry run (PDFs are saved, not printed)' : 'Printing'),
+      );
+    } catch (e) {
+      $('status').replaceChildren(...row('Status', e.message));
+    }
+    try {
+      const p = await listPrinters({ agentUrl });
+      const list = document.createElement('ul');
+      for (const name of p.printers) {
+        const li = document.createElement('li');
+        li.textContent = name === p.configured ? `${name}  ← configured` : name;
+        if (name === p.configured) li.className = 'configured';
+        list.append(li);
+      }
+      const note = document.createElement('p');
+      note.className = p.configuredFound ? 'ok' : 'err';
+      note.textContent = p.configuredFound
+        ? 'The configured printer was found.'
+        : `PRINTER_NAME "${p.configured}" is not in this list. Copy the exact name into .env.`;
+      $('printers').replaceChildren(list, note);
+    } catch (e) {
+      $('printers').textContent = e.message;
+    }
+  }
+
+  async function run(button, resultEl, getPdf) {
+    button.disabled = true;
+    try {
+      const pdf = await getPdf();
+      const r = await printLabel(pdf, { copies: Number($('copies').value) || 1, agentUrl });
+      show(resultEl, true, r.savedTo ? `Saved (dry run): ${r.savedTo}` : `Sent to printer${r.jobId ? ` (job ${r.jobId})` : ''}.`);
+    } catch (e) {
+      show(resultEl, false, e.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  $('print-test').addEventListener('click', () => run($('print-test'), $('test-result'), () =>
+    makeTestLabelPdf({
+      widthMm: Number($('w').value),
+      heightMm: Number($('h').value),
+      lines: $('text').value.split('\n'),
+    })));
+
+  $('print-file').addEventListener('click', () => run($('print-file'), $('file-result'), () => {
+    const file = $('file').files[0];
+    if (!file) throw new Error('Choose a PDF file first.');
+    return file;
+  }));
+
+  refresh();
+</script>
+</body>
+</html>

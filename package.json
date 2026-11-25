@@ -1,0 +1,15 @@
+{
+  "name": "label-print-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local agent that lets a website print PDF labels to a specific printer (Brother QL-1100C) on macOS and Windows.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "scripts": {
+    "start": "node --env-file=.env src/server.js",
+    "test": "node --test test/",
+    "make-test-label": "node scripts/make-test-label.js"
+  }
+}
